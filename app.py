@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 import os
-
 import aws_cdk as cdk
 
 from my_eks_cluster.my_eks_cluster_stack import MyEksClusterStack
-
 
 app = cdk.App()
 MyEksClusterStack(app, "MyEksClusterStack",
