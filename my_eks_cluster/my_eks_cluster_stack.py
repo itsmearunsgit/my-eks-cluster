@@ -5,12 +5,14 @@ from aws_cdk import (
     aws_lambda as _lambda,
     aws_iam as iam,
     aws_ec2 as ec2
+    core
 )
 from constructs import Construct
 from aws_cdk.aws_eks import Cluster, KubernetesVersion
 from aws_cdk.lambda_layer_kubectl import KubectlLayer
 from aws_cdk.aws_iam import Role, ServicePrincipal, ManagedPolicy
 from aws_cdk.aws_ec2 import Vpc, SubnetType
+from aws_cdk import custom_resources as cr
 
 class MyEksClusterStack(Stack):
 
@@ -22,23 +24,14 @@ class MyEksClusterStack(Stack):
                              parameter_name="/platform/account/env",
                              string_list_value=["prod","dev"],
                              tier=ssm.ParameterTier.ADVANCED)        
-        #prod_param_count = ssm.StringParameter(self, "AccountEnvParam",
-            #parameter_name="/platform/account/production",
-            #string_value="2")  # SSM parameter for production
-        #core.Tags.of(prod_param_count).add("Environment", "Prod")
 
-        #dev_param_count = ssm.StringParameter(self, "AccountEnvParamdev",
-            #parameter_name="/platform/account/development",
-            #string_value="1")  # SSM parameter for development
-        #core.Tags.of(dev_param_count).add("Environment", "Dev")
-        
         # Define the VPC
         vpc = Vpc(
             self, "EksVpc",
             max_azs=3,  # Default is all AZs in the region
             subnet_configuration=[
                 {
-                    "subnetType": SubnetType.PUBLIC,
+                    "subnetType": ec2.SubnetType.PUBLIC,
                     "name": "Public",
                     "cidrMask": 24
                 },  
@@ -70,7 +63,7 @@ class MyEksClusterStack(Stack):
 
         # Create Custom Resource Lambda
         function = _lambda.Function(self, "CustomResourceHandler",
-                    runtime=_lambda.Runtime.PYTHON_3_13,
+                    runtime=_lambda.Runtime.PYTHON_3_10,
                     handler="index.handler",
                     code=_lambda.Code.from_inline("""
 import boto3
@@ -101,7 +94,7 @@ def handler(event, context):
         replica_count_pod = custom_resource.get_att('ReplicaCount').to_string()
 
         # Deploy ingress-nginx Helm chart
-        eks-cdk-cluster.add_helm_chart("NginxIngress",
+        cluster.add_helm_chart("NginxIngress",
                                chart="ingress-nginx",
                                repository="https://kubernetes.github.io/ingress-nginx",
                                namespace="kube-system",
