@@ -4,15 +4,16 @@ from aws_cdk import (
     aws_ssm as ssm,
     aws_lambda as _lambda,
     aws_iam as iam,
-    aws_ec2 as ec2
-    core
+    aws_ec2 as ec2 
 )
+import aws_cdk as cdk
 from constructs import Construct
 from aws_cdk.aws_eks import Cluster, KubernetesVersion
 from aws_cdk.lambda_layer_kubectl import KubectlLayer
 from aws_cdk.aws_iam import Role, ServicePrincipal, ManagedPolicy
 from aws_cdk.aws_ec2 import Vpc, SubnetType
 from aws_cdk import custom_resources as cr
+from my_eks_cluster.cust_lambda import MyCustomResourceStack
 
 class MyEksClusterStack(Stack):
 
@@ -31,10 +32,15 @@ class MyEksClusterStack(Stack):
             max_azs=3,  # Default is all AZs in the region
             subnet_configuration=[
                 {
-                    "subnetType": ec2.SubnetType.PUBLIC,
+                    "subnetType": SubnetType.PUBLIC,
                     "name": "Public",
                     "cidrMask": 24
-                },  
+                }, 
+                {
+                    "subnetType": SubnetType.PRIVATE_WITH_EGRESS,
+                    "name": "Private",
+                    "cidrMask": 24
+                }
             ]
         )
         # Define the IAM role for the EKS cluster
@@ -57,45 +63,15 @@ class MyEksClusterStack(Stack):
             cluster_name= "eks-cdk-cluster",
             masters_role=eks_role,
             vpc=vpc,
-            default_capacity_instance=aws_ec2.InstanceType("t3.medium"),
+            default_capacity_instance=ec2.InstanceType("t3.medium"),
             default_capacity=1
         )
-
-        # Create Custom Resource Lambda
-        function = _lambda.Function(self, "CustomResourceHandler",
-                    runtime=_lambda.Runtime.PYTHON_3_10,
-                    handler="index.handler",
-                    code=_lambda.Code.from_inline("""
-import boto3
-import json
-
-def handler(event, context):
-    ssm_client = boto3.client('ssm')
-    response = ssm_client.get_parameter(Name='/platform/account/env', WithDecryption=False)
-    # Get the list of values
-    parameter_value = response['Parameter']['Value']
-    values_list = parameter_value.split(',')
-    if 'prod' in values_list:
-        replica_count = 2
-    elif 'dev' in values_list:
-        replica_count = 1
-    else:
-        replica_count = 1
-    return {'Data': {'ReplicaCount': replica_count}}
-                                    """))
-
-        # Create Custom Resource
-        provider = cr.Provider(self, "CustomResourceProvider",
-                               on_event_handler=function)
-
-        custom_resource = cr.CustomResource(self, "CustomResource",
-                                            service_token=provider.service_token)
-
-        replica_count_pod = custom_resource.get_att('ReplicaCount').to_string()
-
+        
+        
         # Deploy ingress-nginx Helm chart
         cluster.add_helm_chart("NginxIngress",
                                chart="ingress-nginx",
                                repository="https://kubernetes.github.io/ingress-nginx",
                                namespace="kube-system",
-                               values={"controller": {"replicaCount": replica_count_pod}})
+                               values={"controller": {"replicaCount": replica_count_pod}})        
+
