@@ -88,7 +88,7 @@ def handler(event, context):
        # Get the list of values
        parameter_value = response['Parameter']['Value']
        values_list = parameter_value.split(',')
-       env_value = event['env']   
+       env_value = event['env']                                              
        print (env_value)                                        
        if env_value in values_list and env_value=="prod":
            replica_count = 2
@@ -97,8 +97,11 @@ def handler(event, context):
        else:
            replica_count = 0
        #return {'Data': {'ReplicaCount': replica_count}}
-       Data = {"Status": "SUCCESS", "Reason": "The resource was successfully created", "PhysicalResourceId": "CustomResourceId", 'ReplicaCount': replica_count} 
-       return Data
+       status_results = {"Status": "SUCCESS", "Reason": "The resource was successfully created", "PhysicalResourceId": "CustomResourceId", 'ReplicaCount': replica_count} 
+       try:
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, status_results)
+        except Exception as e:
+            cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)}, status_results)                                           
                                                   
     except ssm_client.exceptions.ParameterNotFound as e:
         # Catch and handle the case where the parameter does not exist
@@ -113,12 +116,8 @@ def handler(event, context):
             'statusCode': 500,
             'Error': f"An unexpected error occurred: {str(e)}"
         } 
-    physical_resource_id =  event.get('CustomResourceId') 
-    try:
-        cfnresponse.send(event, context, cfnresponse.SUCCESS, Response)
-    except Exception as e:
-        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)}, Response)                                                                                 
-
+     
+                                                                                
                                     """))
         custom_lambda_function.add_to_role_policy(
             iam.PolicyStatement(
@@ -126,10 +125,6 @@ def handler(event, context):
                 resources=["*"]
             )
         )
-        # Create Custom Resource Provider
-        #provider = cr.Provider(self, "CustomResourceProvider",
-                               #on_event_handler=custom_lambda_function)
-        
         
         my_dict = {
             "env": "dev"
@@ -141,6 +136,7 @@ def handler(event, context):
                 "action": "invoke",
                 "parameters": {
                     "FunctionName": custom_lambda_function.function_name,
+                    "InvocationType": "RequestResponse",
                     "Payload": json.dumps(my_dict)
                 },
                 "physical_resource_id": cr.PhysicalResourceId.of("CustomResourceId"),
@@ -153,8 +149,10 @@ def handler(event, context):
             ])
         )
         print(custom_resource)
-        CfnOutput(self, "CustomResourceOutput", value=custom_resource.get_response_field('Response["ReplicaCount"]'), export_name="Lambdacustomresourceoutput")
-        replica_count_pod = custom_resource.get_response_field('Response["ReplicaCount"]')
+        CfnOutput(self, "CustomResourceOutput", value=custom_resource.get_response_field("{'Data': {'status_results': {'ReplicaCount': ['replica_count'}}}"), export_name="Lambdacustomresourceoutput")
+        replica_count_pod = custom_resource.get_response_field("{'Data': {'status_results': {'ReplicaCount': ['replica_count'}}}")
+        
+                                                      
         cluster.add_helm_chart("NginxIngress",
                                chart="ingress-nginx",
                                repository="https://kubernetes.github.io/ingress-nginx",
