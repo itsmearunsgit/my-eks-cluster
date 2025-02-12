@@ -13,8 +13,9 @@ from aws_cdk.lambda_layer_kubectl import KubectlLayer
 from aws_cdk.aws_iam import Role, ServicePrincipal, ManagedPolicy
 from aws_cdk.aws_ec2 import Vpc, SubnetType
 from aws_cdk import custom_resources as cr
-from aws_cdk import App, Stack
 from aws_cdk import aws_lambda as lambda_
+from aws_cdk import CfnOutput
+from aws_cdk import App, Stack
 
 
 
@@ -71,12 +72,13 @@ class MyEksClusterStack(Stack):
         )
         
         # Create Custom Resource Lambda function to act as the provoider for custom resource
-        function = lambda_.Function(self, "CustomResourceHandler",
+        custom_lambda_function = lambda_.Function(self, "CustomResourceHandler",
                     runtime=lambda_.Runtime.PYTHON_3_10,
                     handler="index.handler",
                     code=lambda_.Code.from_inline("""
 import boto3
 import json
+import cfnresponse                                                  
 
 def handler(event, context):
                                                  
@@ -94,10 +96,9 @@ def handler(event, context):
            replica_count = 1
        else:
            replica_count = 0
-       print ({'Data': {'ReplicaCount': replica_count}})
        #return {'Data': {'ReplicaCount': replica_count}}
-       return {"Status": "SUCCESS", "Reason": "The resource was successfully created", "PhysicalResourceId": "CustomResourceId", 'Data': {'ReplicaCount': replica_count}} 
-    
+       Data = {"Status": "SUCCESS", "Reason": "The resource was successfully created", "PhysicalResourceId": "CustomResourceId", 'ReplicaCount': replica_count} 
+       return Data
                                                   
     except ssm_client.exceptions.ParameterNotFound as e:
         # Catch and handle the case where the parameter does not exist
@@ -111,12 +112,23 @@ def handler(event, context):
         return {
             'statusCode': 500,
             'Error': f"An unexpected error occurred: {str(e)}"
-        }                                                                                     
-                                    """))
+        } 
+    physical_resource_id =  event.get('CustomResourceId') 
+    try:
+        cfnresponse.send(event, context, cfnresponse.SUCCESS, Response)
+    except Exception as e:
+        cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)}, Response)                                                                                 
 
+                                    """))
+        custom_lambda_function.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["cloudformation:DescribeStacks", "cloudformation:DescribeStackResources"],
+                resources=["*"]
+            )
+        )
         # Create Custom Resource Provider
-        provider = cr.Provider(self, "CustomResourceProvider",
-                               on_event_handler=function)
+        #provider = cr.Provider(self, "CustomResourceProvider",
+                               #on_event_handler=custom_lambda_function)
         
         
         my_dict = {
@@ -128,7 +140,7 @@ def handler(event, context):
                 "service": "Lambda",
                 "action": "invoke",
                 "parameters": {
-                    "FunctionName": function.function_name,
+                    "FunctionName": custom_lambda_function.function_name,
                     "Payload": json.dumps(my_dict)
                 },
                 "physical_resource_id": cr.PhysicalResourceId.of("CustomResourceId"),
@@ -136,11 +148,13 @@ def handler(event, context):
             policy=cr.AwsCustomResourcePolicy.from_statements([
                 iam.PolicyStatement(
                     actions=["lambda:InvokeFunction"],
-                    resources=[function.function_arn],
+                    resources=[custom_lambda_function.function_arn],
                 )
             ])
         )
-        replica_count_pod = custom_resource.get_response_field('Data.ReplicaCount')
+        print(custom_resource)
+        CfnOutput(self, "CustomResourceOutput", value=custom_resource.get_response_field('Response["ReplicaCount"]'), export_name="Lambdacustomresourceoutput")
+        replica_count_pod = custom_resource.get_response_field('Response["ReplicaCount"]')
         cluster.add_helm_chart("NginxIngress",
                                chart="ingress-nginx",
                                repository="https://kubernetes.github.io/ingress-nginx",
