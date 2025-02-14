@@ -16,7 +16,7 @@ from aws_cdk import custom_resources as cr
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import CfnOutput
 from aws_cdk import App, Stack
-
+from aws_cdk import Aws
 
 
 class MyEksClusterStack(Stack):
@@ -78,16 +78,16 @@ class MyEksClusterStack(Stack):
                     code=lambda_.Code.from_inline("""
 import boto3
 import json
-import cfnresponse                                                  
+                                                
 
 def handler(event, context):
                                                  
-    ssm_client = boto3.client('ssm')
-    try:                                              
+   ssm_client = boto3.client('ssm')
+   try:                                              
        response = ssm_client.get_parameter(Name='/platform/account/env', WithDecryption=False)
        # Get the list of values
        parameter_value = response['Parameter']['Value']
-       values_list = parameter_value.split(',')
+       values_list = parameter_value.split(',')                                        
        env_value = event['env']                                              
        print (env_value)                                        
        if env_value in values_list and env_value=="prod":
@@ -95,40 +95,44 @@ def handler(event, context):
        elif env_value in values_list and env_value=="dev":
            replica_count = 1
        else:
-           replica_count = 0
-       #return {'Data': {'ReplicaCount': replica_count}}
-       status_results = {"Status": "SUCCESS", "Reason": "The resource was successfully created", "PhysicalResourceId": "CustomResourceId", 'ReplicaCount': replica_count} 
+           replica_count = 1
+       status = {"ReplicaCount": replica_count}                                               
+       
        try:
-            cfnresponse.send(event, context, cfnresponse.SUCCESS, status_results)
-        except Exception as e:
-            cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)}, status_results)                                           
+            return({"Status": "SUCCESS", "Reason": "Custom Resource execution", "PhysicalResourceId": "CustomResourceId", 'Data': status})
+       except Exception as e:
+            return {
+               'statusCode': 500,
+               'Error': f"An unexpected error occurred: {str(e)}"
+            }                                        
+                                                       
                                                   
-    except ssm_client.exceptions.ParameterNotFound as e:
+   except ssm_client.exceptions.ParameterNotFound as e:
         # Catch and handle the case where the parameter does not exist
         return {
             'statusCode': 400,
             'Error': f"Parameter '/platform/account/env' not found: {str(e)}"
         }
     
-    except Exception as e:
+   except Exception as e:
         # Catch any other unexpected exceptions
         return {
             'statusCode': 500,
             'Error': f"An unexpected error occurred: {str(e)}"
         } 
-     
                                                                                 
                                     """))
+        
         custom_lambda_function.add_to_role_policy(
             iam.PolicyStatement(
-                actions=["cloudformation:DescribeStacks", "cloudformation:DescribeStackResources"],
+                actions=["cloudformation:DescribeStacks", "cloudformation:DescribeStackResources", "ssm:GetParameter"],
                 resources=["*"]
             )
         )
-        
         my_dict = {
             "env": "dev"
         }
+
         # Create Custom resource
         custom_resource = cr.AwsCustomResource(self, "CustomResource",
             on_create={
@@ -137,7 +141,8 @@ def handler(event, context):
                 "parameters": {
                     "FunctionName": custom_lambda_function.function_name,
                     "InvocationType": "RequestResponse",
-                    "Payload": json.dumps(my_dict)
+                    "Payload": json.dumps(my_dict)  
+                            
                 },
                 "physical_resource_id": cr.PhysicalResourceId.of("CustomResourceId"),
             },
@@ -148,10 +153,12 @@ def handler(event, context):
                 )
             ])
         )
-        print(custom_resource)
-        CfnOutput(self, "CustomResourceOutput", value=custom_resource.get_response_field("{'Data': {'status_results': {'ReplicaCount': ['replica_count'}}}"), export_name="Lambdacustomresourceoutput")
-        replica_count_pod = custom_resource.get_response_field("{'Data': {'status_results': {'ReplicaCount': ['replica_count'}}}")
         
+        CfnOutput(self, "CustomResourceOutput", value=custom_resource.get_response_field("{'Data': {'status': ['ReplicaCount']}}"), export_name="Lambdacustomresourceoutput")
+        
+        replica_count_pod = custom_resource.get_response_field("{'Data': {'status': ['ReplicaCount']}}")
+        
+        # Create NginxIngress replicas using HELM chart
                                                       
         cluster.add_helm_chart("NginxIngress",
                                chart="ingress-nginx",

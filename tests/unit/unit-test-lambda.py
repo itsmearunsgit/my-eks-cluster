@@ -15,13 +15,13 @@ def test_replica_count_production(ssm_setup):
     event = {}
     context = {}
     response = handler(event, context)
-    assert response['Data']['ReplicaCount'] == 2
+    assert response['status']['ReplicaCount'] == 2
     
 def test_replica_count_development(ssm_setup):
     event = {}
     context = {}
     response = handler(event, context)
-    assert response['Data']['ReplicaCount'] == 1
+    assert response['status']['ReplicaCount'] == 1
 
 
 
